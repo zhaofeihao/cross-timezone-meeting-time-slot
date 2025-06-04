@@ -19,31 +19,97 @@ export const COMMON_TIMEZONES = [
   { value: 'UTC', label: 'UTC 协调世界时', offset: 0 }
 ];
 
-// 将时间转换到指定时区
+// 将时间转换到指定时区（正确处理夏令时）
 export const convertToTimezone = (date, fromTimezone, toTimezone) => {
-  // 创建一个Date对象，假设输入是本地时间
   const inputDate = new Date(date);
   
-  // 获取源时区的偏移量（分钟）
-  const fromOffset = getTimezoneOffset(fromTimezone);
-  const toOffset = getTimezoneOffset(toTimezone);
+  // 使用更简单的方法：将输入时间解释为源时区的本地时间
+  // 然后转换为目标时区
   
-  // 计算时间差（毫秒）
-  const offsetDiff = (toOffset - fromOffset) * 60 * 1000;
+  // 1. 获取输入时间的年月日时分秒
+  const year = inputDate.getFullYear();
+  const month = inputDate.getMonth();
+  const day = inputDate.getDate();
+  const hours = inputDate.getHours();
+  const minutes = inputDate.getMinutes();
+  const seconds = inputDate.getSeconds();
   
-  // 应用时区转换
-  const convertedDate = new Date(inputDate.getTime() + offsetDiff);
+  // 2. 创建一个时间字符串，然后使用时区信息解析
+  const timeString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   
-  return convertedDate;
+  // 3. 将这个时间字符串解释为源时区的本地时间，并转换为UTC
+  const sourceDate = new Date(timeString);
+  const utcTime = convertLocalTimeToUTC(sourceDate, fromTimezone);
+  
+  // 4. 将UTC时间转换为目标时区
+  const targetTime = convertUTCToLocalTime(utcTime, toTimezone);
+  
+  return targetTime;
 };
 
-// 获取时区偏移量（以分钟为单位）
+// 将本地时间转换为UTC（考虑指定时区）
+const convertLocalTimeToUTC = (localTime, timezone) => {
+  // 获取该时区在指定时间的偏移量
+  const offset = getTimezoneOffsetMinutes(timezone, localTime);
+  return new Date(localTime.getTime() - offset * 60 * 1000);
+};
+
+// 将UTC时间转换为本地时间（考虑指定时区）
+const convertUTCToLocalTime = (utcTime, timezone) => {
+  // 获取该时区在指定时间的偏移量
+  const offset = getTimezoneOffsetMinutes(timezone, utcTime);
+  return new Date(utcTime.getTime() + offset * 60 * 1000);
+};
+
+// 获取指定时区相对于UTC的偏移量（分钟）
+const getTimezoneOffsetMinutes = (timezone, date) => {
+  try {
+    // 使用Intl.DateTimeFormat获取时区偏移
+    const dtf = new Intl.DateTimeFormat('en', {
+      timeZone: timezone,
+      timeZoneName: 'longOffset'
+    });
+    
+    const parts = dtf.formatToParts(date);
+    const offsetPart = parts.find(part => part.type === 'timeZoneName');
+    
+    if (offsetPart && offsetPart.value) {
+      const offsetString = offsetPart.value; // 格式如 "GMT+08:00" 或 "GMT-07:00"
+      const match = offsetString.match(/GMT([+-])(\d{2}):(\d{2})/);
+      
+      if (match) {
+        const sign = match[1] === '+' ? 1 : -1;
+        const hours = parseInt(match[2], 10);
+        const minutes = parseInt(match[3], 10);
+        return sign * (hours * 60 + minutes);
+      }
+    }
+    
+    // 备用方法：比较该时区的时间和UTC时间
+    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const tzDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+    
+    return (tzDate.getTime() - utcDate.getTime()) / (60 * 1000);
+  } catch (error) {
+    console.warn(`无法获取时区 ${timezone} 的偏移量，使用默认值`, error);
+    // 回退到静态偏移量
+    const tz = COMMON_TIMEZONES.find(t => t.value === timezone);
+    return tz ? tz.offset * 60 : 0;
+  }
+};
+
+// 获取时区偏移量（以分钟为单位）- 保留此函数用于向后兼容
 export const getTimezoneOffset = (timezone) => {
   const tz = COMMON_TIMEZONES.find(t => t.value === timezone);
   if (tz) {
     return tz.offset * 60; // 转换为分钟
   }
   return 0; // 默认返回UTC
+};
+
+// 获取实际的时区偏移量（考虑夏令时）
+export const getActualTimezoneOffset = (timezone, date = new Date()) => {
+  return getTimezoneOffsetMinutes(timezone, date);
 };
 
 // 格式化时间显示
